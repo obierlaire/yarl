@@ -6,24 +6,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from functools import _CacheInfo, lru_cache
 from ipaddress import ip_address
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    SupportsInt,
-    Tuple,
-    TypedDict,
-    TypeVar,
-    Union,
-    overload,
-)
-from urllib.parse import (
-    SplitResult,
-    parse_qsl,
-    quote,
-    urlsplit,
-    uses_netloc,
-    uses_relative,
-)
+from typing import TYPE_CHECKING, Any, SupportsInt, Tuple, TypedDict, TypeVar, Union, overload
+from urllib.parse import SplitResult, parse_qsl, quote, urlsplit, uses_netloc, uses_relative
 
 import idna
 from multidict import MultiDict, MultiDictProxy, istr
@@ -817,10 +801,16 @@ class URL:
         """
         return self._PATH_SAFE_UNQUOTER(self.raw_path)
 
+    @classmethod
+    @lru_cache(256)
+    def _parse_query_string(cls, query_string):
+        """Cached helper for parsing query strings."""
+        return parse_qsl(query_string, keep_blank_values=True)
+
     @cached_property
     def _parsed_query(self) -> list[tuple[str, str]]:
         """Parse query part of URL."""
-        return parse_qsl(self._val.query, keep_blank_values=True)
+        return self.__class__._parse_query_string(self._val.query)
 
     @cached_property
     def query(self) -> "MultiDictProxy[str]":
@@ -1341,6 +1331,12 @@ class URL:
         return "&".join(pairs)
 
     @classmethod
+    @lru_cache(128)
+    def _cache_query_quote(cls, query_string):
+        """Cached version of query string quoting."""
+        return cls._QUERY_QUOTER(query_string)
+
+    @classmethod
     def _get_str_query(cls, *args: Any, **kwargs: Any) -> Union[str, None]:
         query: Union[str, Mapping[str, QueryVariable], None]
         if kwargs:
@@ -1359,7 +1355,8 @@ class URL:
         if isinstance(query, Mapping):
             return cls._get_str_query_from_sequence_iterable(query.items())
         if isinstance(query, str):
-            return cls._QUERY_QUOTER(query)
+            # Use cached query quoter for string queries
+            return cls._cache_query_quote(query)
         if isinstance(query, (bytes, bytearray, memoryview)):
             raise TypeError(
                 "Invalid query type: bytes, bytearray and memoryview are forbidden"
@@ -1375,30 +1372,27 @@ class URL:
             "Invalid query type: only str, mapping or "
             "sequence of (key, value) pairs is allowed"
         )
-
     @overload
     def with_query(self, query: Query) -> "URL": ...
 
     @overload
     def with_query(self, **kwargs: QueryVariable) -> "URL": ...
 
+    @lru_cache(128)
+    def _get_query_url(self, query_string):
+        """Cached helper for creating URLs with modified queries."""
+        return self._from_val(self._val._replace(query=query_string))
+
     def with_query(self, *args: Any, **kwargs: Any) -> "URL":
-        """Return a new URL with query part replaced.
-
-        Accepts any Mapping (e.g. dict, multidict.MultiDict instances)
-        or str, autoencode the argument if needed.
-
-        A sequence of (key, value) pairs is supported as well.
-
-        It also can take an arbitrary number of keyword arguments.
-
-        Clear query if None is passed.
-
-        """
-        # N.B. doesn't cleanup query/fragment
-
+        """Return a new URL with query part replaced."""
         new_query = self._get_str_query(*args, **kwargs) or ""
-        return self._from_val(self._val._replace(query=new_query))
+
+        # Fast path: if query is unchanged, return self
+        if self._val.query == new_query:
+            return self
+
+        # Use cached result for common query values
+        return self._get_query_url(new_query)
 
     @overload
     def extend_query(self, query: Query) -> "URL": ...
@@ -1468,24 +1462,31 @@ class URL:
             )
         )
 
+    @lru_cache(128)
+    def _get_fragment_url(self, fragment_value, original_val):
+        return self._from_val(original_val._replace(fragment=fragment_value))
+
     def with_fragment(self, fragment: Union[str, None]) -> "URL":
         """Return a new URL with fragment replaced.
 
         Autoencode fragment if needed.
 
         Clear fragment to default if None is passed.
-
         """
-        # N.B. doesn't cleanup query/fragment
+        # Fast path: if fragment is None, return url with empty fragment
         if fragment is None:
             raw_fragment = ""
         elif not isinstance(fragment, str):
             raise TypeError("Invalid fragment type")
         else:
             raw_fragment = self._FRAGMENT_QUOTER(fragment)
+
+        # Fast path: if fragment is unchanged, return self
         if self._val.fragment == raw_fragment:
             return self
-        return self._from_val(self._val._replace(fragment=raw_fragment))
+
+        # Use cached result for common fragment values
+        return self._get_fragment_url(raw_fragment, self._val)
 
     def with_name(self, name: str) -> "URL":
         """Return a new URL with name (last part of path) replaced.
