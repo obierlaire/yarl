@@ -6,24 +6,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from functools import _CacheInfo, lru_cache
 from ipaddress import ip_address
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    SupportsInt,
-    Tuple,
-    TypedDict,
-    TypeVar,
-    Union,
-    overload,
-)
-from urllib.parse import (
-    SplitResult,
-    parse_qsl,
-    quote,
-    urlsplit,
-    uses_netloc,
-    uses_relative,
-)
+from typing import TYPE_CHECKING, Any, SupportsInt, Tuple, TypedDict, TypeVar, Union, overload
+from urllib.parse import SplitResult, parse_qsl, quote, urlsplit, uses_netloc, uses_relative
 
 import idna
 from multidict import MultiDict, MultiDictProxy, istr
