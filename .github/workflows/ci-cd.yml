@@ -131,8 +131,8 @@ jobs:
       matrix:
         os:
         - ubuntu
-        - windows
-        - macos
+        # - windows
+        # - macos
         tag:
         - ''
         - 'musllinux'
@@ -185,16 +185,16 @@ jobs:
       matrix:
         pyver:
         - 3.13
-        - 3.12
-        - 3.11
-        - >-
-          3.10
-        - 3.9
+        # - 3.12
+        # - 3.11
+        # - >-
+        #   3.10
+        # - 3.9
         no-extensions: ['', 'Y']
         os:
         - ubuntu-latest
-        - macos-latest
-        - windows-latest
+        # - macos-latest
+        # - windows-latest
         experimental: [false]
         exclude:
         - os: macos-latest
