@@ -6,24 +6,8 @@ from collections.abc import Iterable, Mapping, Sequence
 from contextlib import suppress
 from functools import _CacheInfo, lru_cache
 from ipaddress import ip_address
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    SupportsInt,
-    Tuple,
-    TypedDict,
-    TypeVar,
-    Union,
-    overload,
-)
-from urllib.parse import (
-    SplitResult,
-    parse_qsl,
-    quote,
-    urlsplit,
-    uses_netloc,
-    uses_relative,
-)
+from typing import TYPE_CHECKING, Any, SupportsInt, Tuple, TypedDict, TypeVar, Union, overload
+from urllib.parse import SplitResult, parse_qsl, quote, urlsplit, uses_netloc, uses_relative
 
 import idna
 from multidict import MultiDict, MultiDictProxy, istr
@@ -1468,24 +1452,31 @@ class URL:
             )
         )
 
+    @lru_cache(128)
+    def _get_fragment_url(self, fragment_value, original_val):
+        return self._from_val(original_val._replace(fragment=fragment_value))
+
     def with_fragment(self, fragment: Union[str, None]) -> "URL":
         """Return a new URL with fragment replaced.
 
         Autoencode fragment if needed.
 
         Clear fragment to default if None is passed.
-
         """
-        # N.B. doesn't cleanup query/fragment
+        # Fast path: if fragment is None, return url with empty fragment
         if fragment is None:
             raw_fragment = ""
         elif not isinstance(fragment, str):
             raise TypeError("Invalid fragment type")
         else:
             raw_fragment = self._FRAGMENT_QUOTER(fragment)
+
+        # Fast path: if fragment is unchanged, return self
         if self._val.fragment == raw_fragment:
             return self
-        return self._from_val(self._val._replace(fragment=raw_fragment))
+
+        # Use cached result for common fragment values
+        return self._get_fragment_url(raw_fragment, self._val)
 
     def with_name(self, name: str) -> "URL":
         """Return a new URL with name (last part of path) replaced.
