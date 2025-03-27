@@ -356,7 +356,42 @@ class URL:
         encoded: bool = False,
     ) -> "URL":
         """Creates and returns a new URL"""
+        cls._validate_build_args(scheme, authority, user, password, host, port, path, query, query_string, fragment)
+        
+        netloc = cls._build_netloc(encoded, authority, host, port, user, password, scheme)
+        
+        if not encoded:
+            path, query_string, fragment = cls._encode_components(path, netloc, query_string, fragment)
+        
+        if query:
+            query_string = cls._get_str_query(query) or ""
 
+        url = object.__new__(cls)
+        # Constructing the tuple directly to avoid the overhead of the lambda and
+        # arg processing since NamedTuples are constructed with a run time built
+        # lambda
+        # https://github.com/python/cpython/blob/d83fcf8371f2f33c7797bc8f5423a8bca8c46e5c/Lib/collections/__init__.py#L441
+        url._val = tuple.__new__(
+            SplitResult, (scheme, netloc, path, query_string, fragment)
+        )
+        url._cache = {}
+        return url
+        
+    @classmethod
+    def _validate_build_args(
+        cls,
+        scheme,
+        authority,
+        user,
+        password,
+        host,
+        port,
+        path,
+        query,
+        query_string,
+        fragment,
+    ):
+        """Validate the arguments passed to build method."""
         if authority and (user or password or host or port):
             raise ValueError(
                 'Can\'t mix "authority" with "user", "password", "host" or "port".'
@@ -379,62 +414,68 @@ class URL:
                 'NoneType is illegal for "scheme", "authority", "host", "path", '
                 '"query_string", and "fragment" args, use empty string instead.'
             )
-
+            
+    @classmethod
+    def _build_netloc(cls, encoded, authority, host, port, user, password, scheme):
+        """Build the netloc part of the URL."""
         if encoded:
-            if authority:
-                netloc = authority
-            elif host:
-                if port is not None:
-                    port = None if port == DEFAULT_PORTS.get(scheme) else port
-                if user is None and password is None:
-                    netloc = host if port is None else f"{host}:{port}"
-                else:
-                    netloc = cls._make_netloc(user, password, host, port)
+            return cls._build_encoded_netloc(authority, host, port, user, password, scheme)
+        else:
+            return cls._build_non_encoded_netloc(authority, host, port, user, password, scheme)
+            
+    @classmethod
+    def _build_encoded_netloc(cls, authority, host, port, user, password, scheme):
+        """Build netloc when encoded=True."""
+        if authority:
+            return authority
+        elif host:
+            port = cls._normalize_port(port, scheme)
+            if user is None and password is None:
+                return host if port is None else f"{host}:{port}"
             else:
-                netloc = ""
-        else:  # not encoded
-            _host: Union[str, None] = None
-            if authority:
-                user, password, _host, port = cls._split_netloc(authority)
-                _host = cls._encode_host(_host, validate_host=False) if _host else ""
-            elif host:
-                _host = cls._encode_host(host, validate_host=True)
-            else:
-                netloc = ""
+                return cls._make_netloc(user, password, host, port)
+        else:
+            return ""
+            
+    @classmethod
+    def _build_non_encoded_netloc(cls, authority, host, port, user, password, scheme):
+        """Build netloc when encoded=False."""
+        _host = None
+        if authority:
+            user, password, _host, port = cls._split_netloc(authority)
+            _host = cls._encode_host(_host, validate_host=False) if _host else ""
+        elif host:
+            _host = cls._encode_host(host, validate_host=True)
+        else:
+            return ""
 
-            if _host is not None:
-                if port is not None:
-                    port = None if port == DEFAULT_PORTS.get(scheme) else port
-                if user is None and password is None:
-                    netloc = _host if port is None else f"{_host}:{port}"
-                else:
-                    netloc = cls._make_netloc(user, password, _host, port, True)
-
-            path = cls._PATH_QUOTER(path) if path else path
-            if path and netloc:
-                if "." in path:
-                    path = cls._normalize_path(path)
-                if path[0] != "/":
-                    cls._raise_for_authority_missing_abs_path()
-
-            query_string = (
-                cls._QUERY_QUOTER(query_string) if query_string else query_string
-            )
-            fragment = cls._FRAGMENT_QUOTER(fragment) if fragment else fragment
-
-        if query:
-            query_string = cls._get_str_query(query) or ""
-
-        url = object.__new__(cls)
-        # Constructing the tuple directly to avoid the overhead of the lambda and
-        # arg processing since NamedTuples are constructed with a run time built
-        # lambda
-        # https://github.com/python/cpython/blob/d83fcf8371f2f33c7797bc8f5423a8bca8c46e5c/Lib/collections/__init__.py#L441
-        url._val = tuple.__new__(
-            SplitResult, (scheme, netloc, path, query_string, fragment)
-        )
-        url._cache = {}
-        return url
+        port = cls._normalize_port(port, scheme)
+        if user is None and password is None:
+            return _host if port is None else f"{_host}:{port}"
+        else:
+            return cls._make_netloc(user, password, _host, port, True)
+            
+    @classmethod
+    def _normalize_port(cls, port, scheme):
+        """Normalize port value based on scheme."""
+        if port is not None:
+            return None if port == DEFAULT_PORTS.get(scheme) else port
+        return port
+        
+    @classmethod
+    def _encode_components(cls, path, netloc, query_string, fragment):
+        """Encode URL components when not already encoded."""
+        encoded_path = cls._PATH_QUOTER(path) if path else path
+        if path and netloc:
+            if "." in path:
+                encoded_path = cls._normalize_path(encoded_path)
+            if encoded_path[0] != "/":
+                cls._raise_for_authority_missing_abs_path()
+                
+        encoded_query_string = cls._QUERY_QUOTER(query_string) if query_string else query_string
+        encoded_fragment = cls._FRAGMENT_QUOTER(fragment) if fragment else fragment
+        
+        return encoded_path, encoded_query_string, encoded_fragment
 
     @classmethod
     def _from_val(cls, val: SplitResult) -> "URL":
